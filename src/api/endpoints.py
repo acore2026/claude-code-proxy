@@ -2,11 +2,10 @@ from fastapi import APIRouter, HTTPException, Request, Header, Depends
 from fastapi.responses import JSONResponse, StreamingResponse
 from datetime import datetime
 import uuid
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from src.core.config import config
 from src.core.logging import logger
-from src.core.client import OpenAIClient
 from src.models.claude import ClaudeMessagesRequest, ClaudeTokenCountRequest
 from src.conversion.request_converter import convert_claude_to_openai
 from src.conversion.response_converter import (
@@ -17,16 +16,27 @@ from src.core.model_manager import model_manager
 
 router = APIRouter()
 
-# Get custom headers from config
-custom_headers = config.get_custom_headers()
 
-openai_client = OpenAIClient(
-    config.openai_api_key,
-    config.openai_base_url,
-    config.request_timeout,
-    api_version=config.azure_api_version,
-    custom_headers=custom_headers,
-)
+def get_llm_client(http_request: Request):
+    client = getattr(http_request.app.state, "llm_client", None)
+    if client is None:
+        raise HTTPException(status_code=503, detail="LLM client is not initialized")
+    return client
+
+
+def get_provider_status(http_request: Request):
+    provider_mode = getattr(http_request.app.state, "provider_mode", "w3" if config.w3_oauth_enabled else "openai")
+    status = {"provider_mode": provider_mode}
+    oauth_manager = getattr(http_request.app.state, "w3_oauth_manager", None)
+    if oauth_manager:
+        status.update(
+            {
+                "w3_authenticated": oauth_manager.authenticated,
+                "w3_token_expires_in": oauth_manager.token_expiry_seconds(),
+                "w3_last_error": oauth_manager.last_error,
+            }
+        )
+    return status
 
 async def validate_api_key(x_api_key: Optional[str] = Header(None), authorization: Optional[str] = Header(None)):
     """Validate the client's API key from either x-api-key header or Authorization header."""
@@ -50,9 +60,52 @@ async def validate_api_key(x_api_key: Optional[str] = Header(None), authorizatio
             detail="Invalid API key. Please provide a valid Anthropic API key."
         )
 
+
+@router.post("/v1/chat/completions")
+async def create_chat_completion(
+    request: Dict[str, Any],
+    http_request: Request,
+    _: None = Depends(validate_api_key),
+):
+    try:
+        llm_client = get_llm_client(http_request)
+        request_id = str(uuid.uuid4())
+
+        if await http_request.is_disconnected():
+            raise HTTPException(status_code=499, detail="Client disconnected")
+
+        if request.get("stream"):
+            openai_stream = llm_client.create_chat_completion_stream(request, request_id)
+            return StreamingResponse(
+                openai_stream,
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Headers": "*",
+                },
+            )
+
+        return await llm_client.create_chat_completion(request, request_id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+
+        logger.error(f"Unexpected error processing OpenAI request: {e}")
+        logger.error(traceback.format_exc())
+        try:
+            error_message = get_llm_client(http_request).classify_openai_error(str(e))
+        except HTTPException:
+            error_message = str(e)
+        raise HTTPException(status_code=500, detail=error_message)
+
+
 @router.post("/v1/messages")
 async def create_message(request: ClaudeMessagesRequest, http_request: Request, _: None = Depends(validate_api_key)):
     try:
+        llm_client = get_llm_client(http_request)
         logger.debug(
             f"Processing Claude request: model={request.model}, stream={request.stream}"
         )
@@ -70,7 +123,7 @@ async def create_message(request: ClaudeMessagesRequest, http_request: Request, 
         if request.stream:
             # Streaming response - wrap in error handling
             try:
-                openai_stream = openai_client.create_chat_completion_stream(
+                openai_stream = llm_client.create_chat_completion_stream(
                     openai_request, request_id
                 )
                 return StreamingResponse(
@@ -79,7 +132,7 @@ async def create_message(request: ClaudeMessagesRequest, http_request: Request, 
                         request,
                         logger,
                         http_request,
-                        openai_client,
+                        llm_client,
                         request_id,
                     ),
                     media_type="text/event-stream",
@@ -96,7 +149,7 @@ async def create_message(request: ClaudeMessagesRequest, http_request: Request, 
                 import traceback
 
                 logger.error(traceback.format_exc())
-                error_message = openai_client.classify_openai_error(e.detail)
+                error_message = llm_client.classify_openai_error(e.detail)
                 error_response = {
                     "type": "error",
                     "error": {"type": "api_error", "message": error_message},
@@ -104,7 +157,7 @@ async def create_message(request: ClaudeMessagesRequest, http_request: Request, 
                 return JSONResponse(status_code=e.status_code, content=error_response)
         else:
             # Non-streaming response
-            openai_response = await openai_client.create_chat_completion(
+            openai_response = await llm_client.create_chat_completion(
                 openai_request, request_id
             )
             claude_response = convert_openai_to_claude_response(
@@ -118,7 +171,10 @@ async def create_message(request: ClaudeMessagesRequest, http_request: Request, 
 
         logger.error(f"Unexpected error processing request: {e}")
         logger.error(traceback.format_exc())
-        error_message = openai_client.classify_openai_error(str(e))
+        try:
+            error_message = get_llm_client(http_request).classify_openai_error(str(e))
+        except HTTPException:
+            error_message = str(e)
         raise HTTPException(status_code=500, detail=error_message)
 
 
@@ -161,7 +217,7 @@ async def count_tokens(request: ClaudeTokenCountRequest, _: None = Depends(valid
 
 
 @router.get("/health")
-async def health_check():
+async def health_check(http_request: Request):
     """Health check endpoint"""
     return {
         "status": "healthy",
@@ -169,15 +225,17 @@ async def health_check():
         "openai_api_configured": bool(config.openai_api_key),
         "api_key_valid": config.validate_api_key(),
         "client_api_key_validation": bool(config.anthropic_api_key),
+        **get_provider_status(http_request),
     }
 
 
 @router.get("/test-connection")
-async def test_connection():
+async def test_connection(http_request: Request):
     """Test API connectivity to OpenAI"""
     try:
+        llm_client = get_llm_client(http_request)
         # Simple test request to verify API connectivity
-        test_response = await openai_client.create_chat_completion(
+        test_response = await llm_client.create_chat_completion(
             {
                 "model": config.small_model,
                 "messages": [{"role": "user", "content": "Hello"}],
@@ -212,7 +270,7 @@ async def test_connection():
 
 
 @router.get("/")
-async def root():
+async def root(http_request: Request):
     """Root endpoint"""
     return {
         "message": "Claude-to-OpenAI API Proxy v1.0.0",
@@ -224,8 +282,10 @@ async def root():
             "client_api_key_validation": bool(config.anthropic_api_key),
             "big_model": config.big_model,
             "small_model": config.small_model,
+            **get_provider_status(http_request),
         },
         "endpoints": {
+            "chat_completions": "/v1/chat/completions",
             "messages": "/v1/messages",
             "count_tokens": "/v1/messages/count_tokens",
             "health": "/health",
