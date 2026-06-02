@@ -40,14 +40,14 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Claude-to-OpenAI API Proxy", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="Claude-to-OpenAI API Proxy", version="1.1.0", lifespan=lifespan)
 
 app.include_router(api_router)
 
 
 def main():
     if len(sys.argv) > 1 and sys.argv[1] == "--help":
-        print("Claude-to-OpenAI API Proxy v1.0.0")
+        print("Claude-to-OpenAI API Proxy v1.1.0")
         print("")
         print("Usage: python src/main.py")
         print("")
@@ -80,7 +80,7 @@ def main():
         sys.exit(0)
 
     # Configuration summary
-    print("🚀 Claude-to-OpenAI API Proxy v1.0.0")
+    print("🚀 Claude-to-OpenAI API Proxy v1.1.0")
     print(f"✅ Configuration loaded successfully")
     print(f"   OpenAI Base URL: {config.openai_base_url}")
     print(f"   Big Model (opus): {config.big_model}")

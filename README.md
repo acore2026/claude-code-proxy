@@ -17,21 +17,23 @@ and refreshes tokens automatically before they expire.
 - OpenAI Chat Completions endpoint: `/v1/chat/completions`
 - Streaming SSE support for both API shapes
 - Tool/function-call passthrough
-- Docker Compose project that runs in W3 mode by default
+- Docker image that bundles the W3 default env file
 - GitHub Actions workflow for publishing a GHCR Docker image
 
 ## Quick Start
 
-### Docker Compose
+### Docker
 
 ```bash
-docker compose up --build
+docker build -t claude-code-proxy:w3 .
+docker run --rm -p 8082:8082 -v claude-code-proxy-w3:/data claude-code-proxy:w3
 ```
 
-The container reads `.env.w3`, listens on `http://localhost:8082`, and stores
-OAuth credentials in the `w3_tokens` Docker volume. On first startup, copy the
-printed W3 SSO URL into your browser. Later starts reuse and refresh the cached
-token automatically.
+The image bundles `.env.w3`, so W3 mode is enabled without passing an env file.
+The `-v claude-code-proxy-w3:/data` volume is optional but recommended so OAuth
+credentials survive container restarts. On first startup, copy the printed W3
+SSO URL into your browser. Later starts reuse and refresh the cached token
+automatically.
 
 ### Local Python
 
@@ -106,8 +108,8 @@ Important variables:
 | `W3_AUTH_TIMEOUT_SECONDS` | Startup login polling timeout. |
 | `ANTHROPIC_API_KEY` | Optional client-side API key expected by the proxy. |
 
-For Docker Compose, keep `W3_TOKEN_FILE=/data/.hw_minimax_oauth.json` so tokens
-persist in the `w3_tokens` volume.
+For Docker, keep `W3_TOKEN_FILE=/data/.hw_minimax_oauth.json` and mount `/data`
+if you want tokens to persist outside the container.
 
 ## Endpoints
 

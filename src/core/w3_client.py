@@ -170,7 +170,7 @@ class W3MiniMaxClient:
             {
                 "Content-Type": "application/json",
                 "Content-Length": str(content_length),
-                "User-Agent": "claude-proxy/1.0.0",
+                "User-Agent": "claude-proxy/1.1.0",
                 "X-Auth-Token": token,
                 "X-Provider-ID": self.config.w3_provider_id,
                 "X-Request-ID": str(uuid.uuid4()),
