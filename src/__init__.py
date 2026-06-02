@@ -10,5 +10,5 @@ from pathlib import Path
 if not load_dotenv():
     load_dotenv(Path(".env.w3"))
 
-__version__ = "1.1.0"
+__version__ = "1.1.1"
 __author__ = "Claude Code Proxy"

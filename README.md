@@ -31,9 +31,9 @@ docker run --rm -p 8082:8082 -v claude-code-proxy-w3:/data claude-code-proxy:w3
 
 The image bundles `.env.w3`, so W3 mode is enabled without passing an env file.
 The `-v claude-code-proxy-w3:/data` volume is optional but recommended so OAuth
-credentials survive container restarts. On first startup, copy the printed W3
-SSO URL into your browser. Later starts reuse and refresh the cached token
-automatically.
+credentials survive container restarts. Docker cannot open a browser on the host;
+on first startup, copy the printed W3 SSO URL into your browser. Later starts
+reuse and refresh the cached token automatically.
 
 ### Local Python
 
@@ -43,7 +43,8 @@ uv run claude-code-proxy
 ```
 
 If `.env` does not exist, the app loads `.env.w3` as the default environment.
-Create `.env` only when you want local overrides.
+Create `.env` only when you want local overrides. Direct WSL runs default to
+opening the Windows host browser unless you set `W3_OPEN_BROWSER=false`.
 
 ## Using The Proxy
 
@@ -89,7 +90,7 @@ W3_OAUTH_ENABLED=true
 W3_API_BASE_URL=https://codeagentcli.rnd.huawei.com/codeAgentPro
 W3_MODEL=MiniMax-M2.7
 W3_TOKEN_FILE=/data/.hw_minimax_oauth.json
-W3_OPEN_BROWSER=false
+# W3_OPEN_BROWSER is intentionally unset.
 W3_VERIFY_TLS=false
 BIG_MODEL=MiniMax-M2.7
 MIDDLE_MODEL=MiniMax-M2.7

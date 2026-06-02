@@ -82,9 +82,10 @@ def run_browser_command(command: List[str]) -> bool:
 def open_auth_url(auth_url: str) -> bool:
     if is_wsl():
         encoded_url = urllib.parse.quote(auth_url, safe=":/?&=%#")
+        ps_url = auth_url.replace("'", "''")
         for command in (
-            ["powershell.exe", "-NoProfile", "-Command", "Start-Process", auth_url],
-            ["cmd.exe", "/C", "start", "", auth_url],
+            ["powershell.exe", "-NoProfile", "-Command", f"Start-Process -FilePath '{ps_url}'"],
+            ["cmd.exe", "/C", "start", "", f'"{auth_url}"'],
             ["wslview", auth_url],
             ["explorer.exe", encoded_url],
         ):
@@ -234,12 +235,12 @@ class W3OAuthManager:
             self.config.w3_scope,
             client_code,
         )
-        print("Open this URL to authenticate W3 SSO:")
-        print(auth_url)
-        print("")
+        print("Open this URL to authenticate W3 SSO:", flush=True)
+        print(auth_url, flush=True)
+        print("", flush=True)
 
         if self.config.w3_open_browser and not open_auth_url(auth_url):
-            print("Could not open a browser automatically. Use the URL above.")
+            print("Could not open a browser automatically. Use the URL above.", flush=True)
 
         return await asyncio.to_thread(self._poll_for_token, client_code)
 
